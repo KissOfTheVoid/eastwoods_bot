@@ -102,7 +102,7 @@ def syrup(user_update: Update, context: CallbackContext) -> int:
 
     # Логируем нажатие кнопки
     logger.info(f"Пользователь {user_update.effective_user.username} выбрал сироп: {context.user_data['syrup']}")
-
+    volumes = ['250', '350', '500']
     keyboard = [[InlineKeyboardButton(volume, callback_data=f'volume_{volume}') for volume in volumes]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     query.edit_message_text(text="Выберите объем:", reply_markup=reply_markup)
@@ -117,7 +117,7 @@ def volume(user_update: Update, context: CallbackContext) -> int:
 
     # Логируем нажатие кнопки
     logger.info(f"Пользователь {user_update.effective_user.username} выбрал объем: {context.user_data['volume']}")
-
+    temperatures = ['Холодный', 'Горячий']
     keyboard = [[InlineKeyboardButton(temp, callback_data=f'temperature_{temp}') for temp in temperatures]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     query.edit_message_text(text="Выберите температуру напитка:", reply_markup=reply_markup)

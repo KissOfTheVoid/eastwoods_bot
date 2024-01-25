@@ -19,6 +19,7 @@ TOKEN = config_data['telegram_bot']['token']
 # Шаги разговора
 SELECT_DRINK, SELECT_MILK, SELECT_SYRUP, SELECT_VOLUME, SELECT_TEMPERATURE, CONFIRM_ORDER = range(6)
 
+user_messages = {}
 
 # Загрузка данных из Excel файла
 def load_menu_data(file_path):
@@ -33,22 +34,29 @@ drinks, milks, syrups = load_menu_data('/Users/walker/Downloads/Eastwood.xlsx')
 
 # Функции для команд
 def start(update: Update, context: CallbackContext) -> int:
-    update.message.reply_text('Добро пожаловать в нашу кофейню! Чтобы сделать заказ, нажмите /order.')
-    return ConversationHandler.END
+    user_id = update.effective_user.id
+    context.user_data['user_messages'] = []  # Инициализируем список сообщений пользователя
 
+    keyboard = [[InlineKeyboardButton(drink, callback_data=f'drink_{drink}') for drink in drinks]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    update.message.reply_text('Добро пожаловать в нашу кофейню! Пожалуйста, выберите напиток:', reply_markup=reply_markup)
+
+    return SELECT_DRINK
 
 def order(user_update: Update, context: CallbackContext) -> int:
-    context.user_data['drink'] = None  # Обнуляем выбранный напиток
-    context.user_data['milk'] = None  # Обнуляем выбранное молоко
-    context.user_data['syrup'] = None  # Обнуляем выбранный сироп
-    context.user_data['volume'] = None  # Обнуляем выбранный объем
-    context.user_data['temperature'] = None  # Обнуляем выбранную температуру
+    user_id = user_update.effective_user.id
+    context.user_data['user_messages'] = []  # Инициализируем список сообщений пользователя
+
+    context.user_data['drink'] = None
+    context.user_data['milk'] = None
+    context.user_data['syrup'] = None
+    context.user_data['volume'] = None
+    context.user_data['temperature'] = None
 
     keyboard = [[InlineKeyboardButton(drink, callback_data=f'drink_{drink}') for drink in drinks]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     user_update.message.reply_text('Пожалуйста, выберите напиток:', reply_markup=reply_markup)
 
-    # Логируем нажатие кнопки
     logger.info(f"Пользователь {user_update.effective_user.username} выбрал команду /order")
 
     return SELECT_DRINK
@@ -149,23 +157,23 @@ def process_user_choice(user_update: Update, context: CallbackContext) -> int:
     query = user_update.callback_query
     query.answer()
     user_choice = query.data
+    user = user_update.effective_user
 
     if user_choice == 'confirm':
-        # Логика обработки подтвержденного заказа
         user_order_description = f"Заказ: {context.user_data['drink']}, {context.user_data['milk']}, {context.user_data['syrup']}, {context.user_data['volume']}ml, {context.user_data['temperature']}."
 
-        # Здесь вы можете отправить сообщение с заказом баристе (замените 'barista_chat_username' на фактический идентификатор чата баристы)
         barista_chat_username = config_data['telegram_bot']['barista_chat_id']
-        context.bot.send_message(chat_id=barista_chat_username, text=f"Новый заказ:\n{user_order_description}")
+        user_link = "@" + user.username
+        message_to_barista = f"Новый заказ от {user_link}:\n{user_order_description}"
 
-        # Отправляем сообщение с подтверждением заказа пользователю
+        context.bot.send_message(chat_id=barista_chat_username, text=message_to_barista)
+
         context.bot.send_message(chat_id=user_update.effective_user.id,
-                                 text="Заказ подтвержден и отправлен на приготовление.")
+                                 text=user_order_description + " подтвержден и отправлен на приготовление.")
     elif user_choice == 'cancel':
         # Логика обработки отмены заказа
         # ...
 
-        # Отправляем сообщение с отменой заказа пользователю
         context.bot.send_message(chat_id=user_update.effective_user.id, text="Заказ отменен.")
 
     return reset_order(user_update, context)

@@ -1,12 +1,11 @@
 import logging
 
+import gspread
 import pandas as pd
 import yaml
+from oauth2client.service_account import ServiceAccountCredentials
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, ConversationHandler, CallbackContext, Filters
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-
 
 # Включаем логирование
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -67,7 +66,8 @@ def load_data_from_sheet(credentials_path, spreadsheet_name, sheet_name):
 
 
 def load_menu_data():
-    drinks = load_data_from_sheet(credentials_path, spreadsheet_name, 'Напитки').set_index('Название').to_dict(orient='index')
+    drinks = load_data_from_sheet(credentials_path, spreadsheet_name, 'Напитки').set_index('Название').to_dict(
+        orient='index')
     milk = load_data_from_sheet(credentials_path, spreadsheet_name, 'Молоко')
     syrups = load_data_from_sheet(credentials_path, spreadsheet_name, 'Сиропы')
     return drinks, milk['Название'].tolist(), syrups['Название'].tolist()
@@ -160,8 +160,7 @@ def drink(user_update: Update, context: CallbackContext) -> int:
 
     # Логируем нажатие кнопки
     logger.info(f"Пользователь {user_update.effective_user.username} выбрал напиток: {context.user_data['drink']}")
-    if drinks[context.user_data['drink']]['Молоко'] == '-' and drinks[context.user_data['drink']][
-        'Тип напитка'] == "Кофе":
+    if drinks[context.user_data['drink']]['Молоко'] == '-':
         keyboard = [[InlineKeyboardButton(syrup, callback_data=f'syrup_{syrup}') for syrup in syrups]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         context.user_data['milk'] = 'Нет'
@@ -400,7 +399,8 @@ def main() -> None:
     dp.add_handler(conv_handler)
     dp.add_handler(CommandHandler('coffee_ready', coffee_ready,
                                   Filters.chat(chat_id=int(config_data['telegram_bot']['barista_chat_id']))))
-    dp.add_handler(CommandHandler("update_menu", update_menu_command, Filters.chat(chat_id=int(config_data['telegram_bot']['barista_chat_id']))))
+    dp.add_handler(CommandHandler("update_menu", update_menu_command,
+                                  Filters.chat(chat_id=int(config_data['telegram_bot']['barista_chat_id']))))
     dp.add_handler(CallbackQueryHandler(order_received, pattern='^received_'))
     dp.add_handler(CallbackQueryHandler(order_ready, pattern='^ready_'))
     updater.start_polling()

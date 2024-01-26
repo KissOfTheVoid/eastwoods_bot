@@ -6,7 +6,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, ConversationHandler, CallbackContext, Filters
 
 # Включаем логирование
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFOб )
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Загрузка данных из YAML-файла
@@ -17,7 +17,8 @@ with open('config.yaml', 'r') as yaml_file:
 TOKEN = config_data['telegram_bot']['token']
 
 # Шаги разговора
-SELECT_DRINK_TYPE, SELECT_DRINK, SELECT_MILK, APPROVE_SYRUP, SELECT_SYRUP_1, SELECT_SYRUP_2, SELECT_VOLUME, SELECT_TEMPERATURE, CONFIRM_ORDER = range(9)
+SELECT_DRINK_TYPE, SELECT_DRINK, SELECT_MILK, APPROVE_SYRUP, SELECT_SYRUP_1, SELECT_SYRUP_2, SELECT_VOLUME, SELECT_TEMPERATURE, CONFIRM_ORDER = range(
+    9)
 
 user_orders = {}
 
@@ -117,7 +118,8 @@ def drink(user_update: Update, context: CallbackContext) -> int:
 
     # Логируем нажатие кнопки
     logger.info(f"Пользователь {user_update.effective_user.username} выбрал напиток: {context.user_data['drink']}")
-    if drinks[context.user_data['drink']]['Молоко'] == '-' and drinks[context.user_data['drink']]['Тип напитка'] == "Кофе":
+    if drinks[context.user_data['drink']]['Молоко'] == '-' and drinks[context.user_data['drink']][
+        'Тип напитка'] == "Кофе":
         keyboard = [[InlineKeyboardButton(syrup, callback_data=f'syrup_{syrup}') for syrup in syrups]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         context.user_data['milk'] = 'Нет'
@@ -181,7 +183,7 @@ def syrup_1(user_update: Update, context: CallbackContext) -> int:
     query = user_update.callback_query
     query.answer()
 
-    context.user_data['syrup_1'] = query.data.split('_')[1] # Сохраняем выбранное молоко
+    context.user_data['syrup_1'] = query.data.split('_')[1]  # Сохраняем выбранное молоко
 
     # Логируем нажатие кнопки
     logger.info(f"Пользователь {user_update.effective_user.username} выбрал сироп: {context.user_data['syrup_1']}")
@@ -239,7 +241,8 @@ def temperature(user_update: Update, context: CallbackContext) -> int:
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     user_order_description = f"Заказ: {context.user_data['drink']}, {context.user_data['milk']}, {context.user_data['syrup_1']},{context.user_data['syrup_2']}, {context.user_data['volume']}ml, {context.user_data['temperature']}."
-    query.edit_message_text(text= user_order_description + "\nПодтвердите ваш заказ или отмените:", reply_markup=reply_markup)
+    query.edit_message_text(text=user_order_description + "\nПодтвердите ваш заказ или отмените:",
+                            reply_markup=reply_markup)
 
     return CONFIRM_ORDER
 
@@ -254,17 +257,20 @@ def process_user_choice(user_update: Update, context: CallbackContext) -> int:
         user_order_description = f"Ваш заказ: {context.user_data['drink']}, {context.user_data['milk']}, {context.user_data['syrup_1']},{context.user_data['syrup_2']}, {context.user_data['volume']}ml, {context.user_data['temperature']}."
 
         barista_chat_username = config_data['telegram_bot']['barista_chat_id']
-
         user_link = "@" + user.username
         message_to_barista = f"Новый заказ от {user_link}:\n{user_order_description}"
-        context.bot.send_message(chat_id=barista_chat_username, text=message_to_barista)
-        user_orders[user.username] = {'chat_id': query['message']['chat']['id'], 'order': user_order_description}
+
+        keyboard = [
+            [InlineKeyboardButton("Заказ получил", callback_data=f"received_%@!#@${user.username}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        context.bot.send_message(chat_id=barista_chat_username, text=message_to_barista, reply_markup=reply_markup)
+        user_orders[user.username] = {'chat_id': query.message.chat.id, 'order': user_order_description}
         context.bot.send_message(chat_id=user_update.effective_user.id,
                                  text=user_order_description + " подтвержден и отправлен на приготовление.")
-    elif user_choice == 'cancel':
-        # Логика обработки отмены заказа
-        # ...
 
+    elif user_choice == 'cancel':
         context.bot.send_message(chat_id=user_update.effective_user.id, text="Заказ отменен.")
 
     return reset_order(user_update, context)
@@ -289,6 +295,21 @@ def coffee_ready(update: Update, context: CallbackContext) -> None:
         update.message.reply_text('В данный момент активных заказов нет.')
 
 
+def order_received(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    query.answer()
+
+    _, username = query.data.split('_%@!#@$')
+    if username in user_orders:
+        chat_id = user_orders[username]['chat_id']
+        context.bot.send_message(chat_id=chat_id, text="Начали готовить ваш заказ")
+        # Здесь можно удалить заказ из user_orders, если это необходимо
+        # del user_orders[username]
+        query.edit_message_text(text=query.message.text)
+    else:
+        query.edit_message_text(text=f"Заказ для {username} уже был обработан или не найден.")
+
+
 def order_ready(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
@@ -296,7 +317,6 @@ def order_ready(update: Update, context: CallbackContext) -> None:
     print(query.data)
     _, username = query.data.split('_%@!#@$')
     print(username)
-
 
     if username in user_orders:
         chat_id = user_orders[username]['chat_id']
@@ -331,6 +351,7 @@ def main() -> None:
     dp.add_handler(conv_handler)
     dp.add_handler(CommandHandler('coffee_ready', coffee_ready,
                                   Filters.chat(chat_id=int(config_data['telegram_bot']['barista_chat_id']))))
+    dp.add_handler(CallbackQueryHandler(order_received, pattern='^received_'))
     dp.add_handler(CallbackQueryHandler(order_ready, pattern='^ready_'))
     updater.start_polling()
     updater.idle()

@@ -17,7 +17,7 @@ with open('config.yaml', 'r') as yaml_file:
 TOKEN = config_data['telegram_bot']['token']
 
 # Шаги разговора
-SELECT_DRINK, SELECT_MILK, SELECT_SYRUP, SELECT_VOLUME, SELECT_TEMPERATURE, CONFIRM_ORDER = range(6)
+SELECT_DRINK_TYPE, SELECT_DRINK, SELECT_MILK, SELECT_SYRUP_1, SELECT_SYRUP_2, SELECT_VOLUME, SELECT_TEMPERATURE, CONFIRM_ORDER = range(8)
 
 user_messages = {}
 
@@ -30,24 +30,45 @@ def load_menu_data(file_path):
     return drinks, milk['Название'].tolist(), syrups['Название'].tolist()
 
 
-drinks, milks, syrups = load_menu_data('/Users/walker/Downloads/Eastwood.xlsx')
+def available_volumes(drink_name):
+    volumes = []
+    for volume, status in drinks[drink_name].items():
+        if volume != 'Молоко' and volume != 'Тип напитка' and status == '+':
+            volumes.append(volume)
+    return volumes
+
+
+def get_unique_drink_types(drinks):
+    # Создаем список, в который будем добавлять уникальные значения
+    unique_types = []
+
+    # Проходим по каждому напитку в словаре drinks
+    for drink, properties in drinks.items():
+        drink_type = properties.get('Тип напитка', None)
+
+        # Проверяем, что значение 'Тип напитка' не пустое и не содержится уже в списке unique_types
+        if drink_type and drink_type not in unique_types:
+            unique_types.append(drink_type)
+
+    return unique_types
+
+
+def get_drinks_by_type(drinks, drink_type):
+    matching_drinks = []
+    for drink, properties in drinks.items():
+        if properties.get('Тип напитка', None) == drink_type:
+            matching_drinks.append(drink)
+    return matching_drinks
+
+
+drinks, milks, syrups = load_menu_data('/Users/walker/Downloads/Eastwood_done.xlsx')
+
+drink_types = get_unique_drink_types(drinks)
 
 
 # Функции для команд
 def start(update: Update, context: CallbackContext) -> int:
     user_id = update.effective_user.id
-    context.user_data['user_messages'] = []  # Инициализируем список сообщений пользователя
-
-    keyboard = [[InlineKeyboardButton(drink, callback_data=f'drink_{drink}') for drink in drinks]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text('Добро пожаловать в нашу кофейню! Пожалуйста, выберите напиток:',
-                              reply_markup=reply_markup)
-
-    return SELECT_DRINK
-
-
-def order(user_update: Update, context: CallbackContext) -> int:
-    user_id = user_update.effective_user.id
     context.user_data['user_messages'] = []  # Инициализируем список сообщений пользователя
 
     context.user_data['drink'] = None
@@ -56,13 +77,13 @@ def order(user_update: Update, context: CallbackContext) -> int:
     context.user_data['volume'] = None
     context.user_data['temperature'] = None
 
-    keyboard = [[InlineKeyboardButton(drink, callback_data=f'drink_{drink}') for drink in list(drinks.keys())]]
+    keyboard = [[InlineKeyboardButton(drink_type, callback_data=f'drink_{drink_type}')] for drink_type in drink_types]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    user_update.message.reply_text('Пожалуйста, выберите напиток:', reply_markup=reply_markup)
+    update.message.reply_text('Добро пожаловать в нашу кофейню! Пожалуйста, выберите тип напитка:',
+                              reply_markup=reply_markup)
+    logger.info(f"Пользователь {update.effective_user.username} выбрал команду /start")
 
-    logger.info(f"Пользователь {user_update.effective_user.username} выбрал команду /order")
-
-    return SELECT_DRINK
+    return SELECT_DRINK_TYPE
 
 
 def reset_order(update: Update, context: CallbackContext) -> int:
@@ -75,11 +96,19 @@ def reset_order(update: Update, context: CallbackContext) -> int:
     return SELECT_DRINK
 
 
-def available_volumes(drink_name):
-    volumes = [volume for volume, status in drinks[drink_name].items() if volume != 'Молоко' and status == '+']
-    return volumes
-
 # Определение обработчиков для каждого шага
+def drink_type(user_update: Update, context: CallbackContext) -> int:
+    query = user_update.callback_query
+    query.answer()
+    desired_type = query.data.split('_')[1]
+    matched_drinks = get_drinks_by_type(drinks, desired_type)
+
+    keyboard = [[InlineKeyboardButton(drink, callback_data=f'drink_{drink}')] for drink in matched_drinks]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    query.edit_message_text(text="Выберете напиток:", reply_markup=reply_markup)
+    return SELECT_DRINK
+
+
 def drink(user_update: Update, context: CallbackContext) -> int:
     query = user_update.callback_query
     query.answer()
@@ -87,18 +116,17 @@ def drink(user_update: Update, context: CallbackContext) -> int:
 
     # Логируем нажатие кнопки
     logger.info(f"Пользователь {user_update.effective_user.username} выбрал напиток: {context.user_data['drink']}")
-    if drinks[context.user_data['drink']]['Молоко'] == '-':
+    if drinks[context.user_data['drink']]['Молоко'] == '-' and drinks[context.user_data['drink']]['Тип напитка'] == "Кофе":
         keyboard = [[InlineKeyboardButton(syrup, callback_data=f'syrup_{syrup}') for syrup in syrups]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         context.user_data['milk'] = 'Нет'
         query.edit_message_text(text="Выберите сироп:", reply_markup=reply_markup)
 
-        return SELECT_SYRUP
+        return SELECT_SYRUP_1
 
     else:
-        keyboard = [[InlineKeyboardButton(milk, callback_data=f'milk_{milk}') for milk in milks]]
+        keyboard = [[InlineKeyboardButton(milk, callback_data=f'milk_{milk}')] for milk in milks]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        print(reply_markup)
         query.edit_message_text(text="Выберите тип молока:", reply_markup=reply_markup)
 
         return SELECT_MILK
@@ -115,19 +143,33 @@ def milk(user_update: Update, context: CallbackContext) -> int:
     keyboard = [[InlineKeyboardButton(syrup, callback_data=f'syrup_{syrup}') for syrup in syrups]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     query.edit_message_text(text="Выберите сироп:", reply_markup=reply_markup)
+    return SELECT_SYRUP_1
 
-    return SELECT_SYRUP
 
-
-def syrup(user_update: Update, context: CallbackContext) -> int:
+def syrup_1(user_update: Update, context: CallbackContext) -> int:
     query = user_update.callback_query
     query.answer()
-    context.user_data['syrup'] = query.data.split('_')[1]  # Сохраняем выбранный сироп
+    context.user_data['syrup_1'] = query.data.split('_')[1] # Сохраняем выбранное молоко
 
     # Логируем нажатие кнопки
-    logger.info(f"Пользователь {user_update.effective_user.username} выбрал сироп: {context.user_data['syrup']}")
+    logger.info(f"Пользователь {user_update.effective_user.username} выбрал сироп: {context.user_data['syrup_1']}")
+
+    keyboard = [[InlineKeyboardButton(syrup, callback_data=f'syrup_{syrup}')] for syrup in syrups]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    query.edit_message_text(text="Выберите второй сироп:", reply_markup=reply_markup)
+
+    return SELECT_SYRUP_2
+
+
+def syrup_2(user_update: Update, context: CallbackContext) -> int:
+    query = user_update.callback_query
+    query.answer()
+    context.user_data['syrup_2'] = query.data.split('_')[1]  # Сохраняем выбранный сироп
+
+    # Логируем нажатие кнопки
+    logger.info(f"Пользователь {user_update.effective_user.username} выбрал сироп: {context.user_data['syrup_2']}")
     volumes = available_volumes(context.user_data['drink'])
-    keyboard = [[InlineKeyboardButton(volume, callback_data=f'volume_{volume}') for volume in volumes]]
+    keyboard = [[InlineKeyboardButton(volume, callback_data=f'volume_{volume}')] for volume in volumes]
     reply_markup = InlineKeyboardMarkup(keyboard)
     query.edit_message_text(text="Выберите объем:", reply_markup=reply_markup)
 
@@ -176,7 +218,7 @@ def process_user_choice(user_update: Update, context: CallbackContext) -> int:
     user = user_update.effective_user
 
     if user_choice == 'confirm':
-        user_order_description = f"Заказ: {context.user_data['drink']}, {context.user_data['milk']}, {context.user_data['syrup']}, {context.user_data['volume']}ml, {context.user_data['temperature']}."
+        user_order_description = f"Заказ: {context.user_data['drink']}, {context.user_data['milk']}, {context.user_data['syrup_1']},{context.user_data['syrup_2']}, {context.user_data['volume']}ml, {context.user_data['temperature']}."
 
         barista_chat_username = config_data['telegram_bot']['barista_chat_id']
         user_link = "@" + user.username
@@ -200,11 +242,13 @@ def main() -> None:
     dp = updater.dispatcher
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start), CommandHandler('order', order)],
+        entry_points=[CommandHandler('start', start)],
         states={
+            SELECT_DRINK_TYPE: [CallbackQueryHandler(drink_type)],
             SELECT_DRINK: [CallbackQueryHandler(drink)],
             SELECT_MILK: [CallbackQueryHandler(milk)],
-            SELECT_SYRUP: [CallbackQueryHandler(syrup)],
+            SELECT_SYRUP_1: [CallbackQueryHandler(syrup_1)],
+            SELECT_SYRUP_2: [CallbackQueryHandler(syrup_2)],
             SELECT_VOLUME: [CallbackQueryHandler(volume)],
             SELECT_TEMPERATURE: [CallbackQueryHandler(temperature)],
             CONFIRM_ORDER: [CallbackQueryHandler(process_user_choice)]

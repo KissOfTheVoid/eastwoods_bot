@@ -21,12 +21,13 @@ SELECT_DRINK, SELECT_MILK, SELECT_SYRUP, SELECT_VOLUME, SELECT_TEMPERATURE, CONF
 
 user_messages = {}
 
+
 # Загрузка данных из Excel файла
 def load_menu_data(file_path):
-    drinks = pd.read_excel(file_path, sheet_name='Напитки')
+    drinks = pd.read_excel(file_path, sheet_name='Напитки').set_index('Название').to_dict(orient='index')
     milk = pd.read_excel(file_path, sheet_name='Молоко')
     syrups = pd.read_excel(file_path, sheet_name='Сиропы')
-    return drinks['Название'].tolist(), milk['Название'].tolist(), syrups['Название'].tolist()
+    return drinks, milk['Название'].tolist(), syrups['Название'].tolist()
 
 
 drinks, milks, syrups = load_menu_data('/Users/walker/Downloads/Eastwood.xlsx')
@@ -39,9 +40,11 @@ def start(update: Update, context: CallbackContext) -> int:
 
     keyboard = [[InlineKeyboardButton(drink, callback_data=f'drink_{drink}') for drink in drinks]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text('Добро пожаловать в нашу кофейню! Пожалуйста, выберите напиток:', reply_markup=reply_markup)
+    update.message.reply_text('Добро пожаловать в нашу кофейню! Пожалуйста, выберите напиток:',
+                              reply_markup=reply_markup)
 
     return SELECT_DRINK
+
 
 def order(user_update: Update, context: CallbackContext) -> int:
     user_id = user_update.effective_user.id
@@ -53,7 +56,7 @@ def order(user_update: Update, context: CallbackContext) -> int:
     context.user_data['volume'] = None
     context.user_data['temperature'] = None
 
-    keyboard = [[InlineKeyboardButton(drink, callback_data=f'drink_{drink}') for drink in drinks]]
+    keyboard = [[InlineKeyboardButton(drink, callback_data=f'drink_{drink}') for drink in list(drinks.keys())]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     user_update.message.reply_text('Пожалуйста, выберите напиток:', reply_markup=reply_markup)
 
@@ -72,6 +75,10 @@ def reset_order(update: Update, context: CallbackContext) -> int:
     return SELECT_DRINK
 
 
+def available_volumes(drink_name):
+    volumes = [volume for volume, status in drinks[drink_name].items() if volume != 'Молоко' and status == '+']
+    return volumes
+
 # Определение обработчиков для каждого шага
 def drink(user_update: Update, context: CallbackContext) -> int:
     query = user_update.callback_query
@@ -80,12 +87,21 @@ def drink(user_update: Update, context: CallbackContext) -> int:
 
     # Логируем нажатие кнопки
     logger.info(f"Пользователь {user_update.effective_user.username} выбрал напиток: {context.user_data['drink']}")
+    if drinks[context.user_data['drink']]['Молоко'] == '-':
+        keyboard = [[InlineKeyboardButton(syrup, callback_data=f'syrup_{syrup}') for syrup in syrups]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        context.user_data['milk'] = 'Нет'
+        query.edit_message_text(text="Выберите сироп:", reply_markup=reply_markup)
 
-    keyboard = [[InlineKeyboardButton(milk, callback_data=f'milk_{milk}') for milk in milks]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    query.edit_message_text(text="Выберите тип молока:", reply_markup=reply_markup)
+        return SELECT_SYRUP
 
-    return SELECT_MILK
+    else:
+        keyboard = [[InlineKeyboardButton(milk, callback_data=f'milk_{milk}') for milk in milks]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        print(reply_markup)
+        query.edit_message_text(text="Выберите тип молока:", reply_markup=reply_markup)
+
+        return SELECT_MILK
 
 
 def milk(user_update: Update, context: CallbackContext) -> int:
@@ -110,7 +126,7 @@ def syrup(user_update: Update, context: CallbackContext) -> int:
 
     # Логируем нажатие кнопки
     logger.info(f"Пользователь {user_update.effective_user.username} выбрал сироп: {context.user_data['syrup']}")
-    volumes = ['250', '350', '500']
+    volumes = available_volumes(context.user_data['drink'])
     keyboard = [[InlineKeyboardButton(volume, callback_data=f'volume_{volume}') for volume in volumes]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     query.edit_message_text(text="Выберите объем:", reply_markup=reply_markup)

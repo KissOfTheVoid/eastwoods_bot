@@ -368,6 +368,15 @@ def order_ready(update: Update, context: CallbackContext) -> None:
         query.edit_message_text(text=f"Заказ для {username} уже был обработан или не найден.")
 
 
+def update_menu_command(update: Update, context: CallbackContext):
+    try:
+        global drinks, milks, syrups
+        drinks, milks, syrups = load_menu_data()
+        update.message.reply_text("Меню было успешно обновлено.")
+    except Exception as e:
+        update.message.reply_text(f"Произошла ошибка при обновлении меню: {e}")
+
+
 def main() -> None:
     updater = Updater(TOKEN, use_context=True)
     dp = updater.dispatcher
@@ -391,6 +400,7 @@ def main() -> None:
     dp.add_handler(conv_handler)
     dp.add_handler(CommandHandler('coffee_ready', coffee_ready,
                                   Filters.chat(chat_id=int(config_data['telegram_bot']['barista_chat_id']))))
+    dp.add_handler(CommandHandler("update_menu", update_menu_command, Filters.chat(chat_id=int(config_data['telegram_bot']['barista_chat_id']))))
     dp.add_handler(CallbackQueryHandler(order_received, pattern='^received_'))
     dp.add_handler(CallbackQueryHandler(order_ready, pattern='^ready_'))
     updater.start_polling()

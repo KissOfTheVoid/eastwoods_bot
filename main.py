@@ -6,7 +6,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, ConversationHandler, CallbackContext, Filters
 
 # Включаем логирование
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFOб )
 logger = logging.getLogger(__name__)
 
 # Загрузка данных из YAML-файла
@@ -271,24 +271,41 @@ def process_user_choice(user_update: Update, context: CallbackContext) -> int:
 
 
 def coffee_ready(update: Update, context: CallbackContext) -> None:
-    # Извлекаем текст сообщения от бариста
-    print("ready")
-    message_text = update.message.text
-    # Разбиваем текст на части для получения имени пользователя
-    _, username = message_text.split()
+    # Проверяем, есть ли активные заказы
+    if user_orders:
+        # Создаем список кнопок
+        keyboard = []
+        for username, order_info in user_orders.items():
+            order_description = order_info['order']
+            # Каждая кнопка содержит описание заказа и имя пользователя
+            button_text = f"Заказ для {username}"
+            callback_data = f"ready_%@!#@${username}"
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
 
-    # Проверяем, есть ли заказ для этого пользователя
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        update.message.reply_text('Выберите заказ, который готов:', reply_markup=reply_markup)
+    else:
+        # Если заказов нет, отправляем сообщение об этом
+        update.message.reply_text('В данный момент активных заказов нет.')
+
+
+def order_ready(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    query.answer()
+    # Получаем username из данных callback
+    print(query.data)
+    _, username = query.data.split('_%@!#@$')
+    print(username)
+
+
     if username in user_orders:
         chat_id = user_orders[username]['chat_id']
         order_description = user_orders[username]['order']
-        # Отправляем уведомление пользователю
         context.bot.send_message(chat_id=chat_id, text=f"Ваш заказ готов: {order_description}")
-
-        # Удаляем заказ из списка
         del user_orders[username]
+        query.edit_message_text(text=f"Заказ для {username} отправлен.")
     else:
-        # Если заказ не найден, отправляем сообщение об этом бариста
-        context.bot.send_message(chat_id=update.effective_chat.id, text=f"Заказ для пользователя {username} не найден.")
+        query.edit_message_text(text=f"Заказ для {username} уже был обработан или не найден.")
 
 
 def main() -> None:
@@ -314,6 +331,7 @@ def main() -> None:
     dp.add_handler(conv_handler)
     dp.add_handler(CommandHandler('coffee_ready', coffee_ready,
                                   Filters.chat(chat_id=int(config_data['telegram_bot']['barista_chat_id']))))
+    dp.add_handler(CallbackQueryHandler(order_ready, pattern='^ready_'))
     updater.start_polling()
     updater.idle()
 

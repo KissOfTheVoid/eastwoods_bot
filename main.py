@@ -17,7 +17,7 @@ with open('config.yaml', 'r') as yaml_file:
 TOKEN = config_data['telegram_bot']['token']
 
 # Шаги разговора
-SELECT_DRINK_TYPE, SELECT_DRINK, SELECT_MILK, SELECT_SYRUP_1, SELECT_SYRUP_2, SELECT_VOLUME, SELECT_TEMPERATURE, CONFIRM_ORDER = range(8)
+SELECT_DRINK_TYPE, SELECT_DRINK, SELECT_MILK, APPROVE_SYRUP, SELECT_SYRUP_1, SELECT_SYRUP_2, SELECT_VOLUME, SELECT_TEMPERATURE, CONFIRM_ORDER = range(9)
 
 user_messages = {}
 
@@ -120,9 +120,13 @@ def drink(user_update: Update, context: CallbackContext) -> int:
         keyboard = [[InlineKeyboardButton(syrup, callback_data=f'syrup_{syrup}') for syrup in syrups]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         context.user_data['milk'] = 'Нет'
-        query.edit_message_text(text="Выберите сироп:", reply_markup=reply_markup)
 
-        return SELECT_SYRUP_1
+        syrup_amount = ["Не хочу", "Один, пожалуйста", "Давайте два"]
+        keyboard = [[InlineKeyboardButton(amount, callback_data=f'syrup_{amount}')] for amount in syrup_amount]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text(text="Хотите сироп?", reply_markup=reply_markup)
+
+        return APPROVE_SYRUP
 
     else:
         keyboard = [[InlineKeyboardButton(milk, callback_data=f'milk_{milk}')] for milk in milks]
@@ -139,16 +143,43 @@ def milk(user_update: Update, context: CallbackContext) -> int:
 
     # Логируем нажатие кнопки
     logger.info(f"Пользователь {user_update.effective_user.username} выбрал тип молока: {context.user_data['milk']}")
-
-    keyboard = [[InlineKeyboardButton(syrup, callback_data=f'syrup_{syrup}') for syrup in syrups]]
+    syrup_amount = ["Не хочу", "Один, пожалуйста", "Давайте два"]
+    keyboard = [[InlineKeyboardButton(amount, callback_data=f'syrup_{amount}')] for amount in syrup_amount]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    query.edit_message_text(text="Выберите сироп:", reply_markup=reply_markup)
-    return SELECT_SYRUP_1
+    query.edit_message_text(text="Хотите сироп?", reply_markup=reply_markup)
+    return APPROVE_SYRUP
+
+
+def approve_syrup(user_update: Update, context: CallbackContext) -> int:
+    query = user_update.callback_query
+    query.answer()
+    syrup_amount = query.data.split('_')[1]
+    if syrup_amount == "Не хочу":
+        context.user_data['syrup_1'] = 'Нет'
+        context.user_data['syrup_2'] = 'Нет'
+        logger.info(f"Пользователь {user_update.effective_user.username} от сиропа")
+        volumes = available_volumes(context.user_data['drink'])
+        keyboard = [[InlineKeyboardButton(volume, callback_data=f'volume_{volume}')] for volume in volumes]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text(text="Выберите объем:", reply_markup=reply_markup)
+        return SELECT_VOLUME
+    if syrup_amount == "Один, пожалуйста":
+        context.user_data['syrup_1'] = 'Нет'
+        keyboard = [[InlineKeyboardButton(syrup, callback_data=f'syrup_{syrup}')] for syrup in syrups]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text(text="Выберите сироп:", reply_markup=reply_markup)
+        return SELECT_SYRUP_2
+    if syrup_amount == "Давайте два":
+        keyboard = [[InlineKeyboardButton(syrup, callback_data=f'syrup_{syrup}')] for syrup in syrups]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text(text="Выберите сироп:", reply_markup=reply_markup)
+        return SELECT_SYRUP_1
 
 
 def syrup_1(user_update: Update, context: CallbackContext) -> int:
     query = user_update.callback_query
     query.answer()
+
     context.user_data['syrup_1'] = query.data.split('_')[1] # Сохраняем выбранное молоко
 
     # Логируем нажатие кнопки
@@ -156,7 +187,7 @@ def syrup_1(user_update: Update, context: CallbackContext) -> int:
 
     keyboard = [[InlineKeyboardButton(syrup, callback_data=f'syrup_{syrup}')] for syrup in syrups]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    query.edit_message_text(text="Выберите второй сироп:", reply_markup=reply_markup)
+    query.edit_message_text(text="Выберите сироп :) ", reply_markup=reply_markup)
 
     return SELECT_SYRUP_2
 
@@ -247,6 +278,7 @@ def main() -> None:
             SELECT_DRINK_TYPE: [CallbackQueryHandler(drink_type)],
             SELECT_DRINK: [CallbackQueryHandler(drink)],
             SELECT_MILK: [CallbackQueryHandler(milk)],
+            APPROVE_SYRUP: [CallbackQueryHandler(approve_syrup)],
             SELECT_SYRUP_1: [CallbackQueryHandler(syrup_1)],
             SELECT_SYRUP_2: [CallbackQueryHandler(syrup_2)],
             SELECT_VOLUME: [CallbackQueryHandler(volume)],

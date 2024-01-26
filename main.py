@@ -4,6 +4,9 @@ import pandas as pd
 import yaml
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, ConversationHandler, CallbackContext, Filters
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+
 
 # Включаем логирование
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -12,6 +15,9 @@ logger = logging.getLogger(__name__)
 # Загрузка данных из YAML-файла
 with open('config.yaml', 'r') as yaml_file:
     config_data = yaml.safe_load(yaml_file)
+
+credentials_path = config_data['menu_sheets']['keys_filename']
+spreadsheet_name = config_data['menu_sheets']['doc_name']
 
 # Получение токена бота и идентификатора чата с баристой
 TOKEN = config_data['telegram_bot']['token']
@@ -24,10 +30,46 @@ user_orders = {}
 
 
 # Загрузка данных из Excel файла
-def load_menu_data(file_path):
-    drinks = pd.read_excel(file_path, sheet_name='Напитки').set_index('Название').to_dict(orient='index')
-    milk = pd.read_excel(file_path, sheet_name='Молоко')
-    syrups = pd.read_excel(file_path, sheet_name='Сиропы')
+def load_data_from_sheet(credentials_path, spreadsheet_name, sheet_name):
+    """
+    Загрузить данные из указанного листа Google Таблицы в DataFrame.
+
+    :param credentials_path: Путь к JSON файлу учетных данных.
+    :param spreadsheet_name: Название Google Таблицы.
+    :param sheet_name: Название листа для загрузки данных.
+    :return: DataFrame с данными из указанного листа.
+    """
+    # Настраиваем аутентификацию
+    credentials = ServiceAccountCredentials.from_json_keyfile_name(
+        credentials_path,
+        ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+    )
+    gc = gspread.authorize(credentials)
+
+    # Открываем таблицу и лист
+    spreadsheet = gc.open(spreadsheet_name)
+    worksheet = spreadsheet.worksheet(sheet_name)
+
+    # Получаем все данные из листа
+    data = worksheet.get_all_values()
+
+    # Преобразуем данные в DataFrame
+    df = pd.DataFrame(data)
+
+    # Используем первую строку в качестве заголовков столбцов
+    df.columns = df.iloc[0]
+    df = df[1:]
+
+    # Сбрасываем индекс, если это необходимо
+    df.reset_index(drop=True, inplace=True)
+
+    return df
+
+
+def load_menu_data():
+    drinks = load_data_from_sheet(credentials_path, spreadsheet_name, 'Напитки').set_index('Название').to_dict(orient='index')
+    milk = load_data_from_sheet(credentials_path, spreadsheet_name, 'Молоко')
+    syrups = load_data_from_sheet(credentials_path, spreadsheet_name, 'Сиропы')
     return drinks, milk['Название'].tolist(), syrups['Название'].tolist()
 
 
@@ -62,7 +104,7 @@ def get_drinks_by_type(drinks, drink_type):
     return matching_drinks
 
 
-drinks, milks, syrups = load_menu_data('/Users/walker/Downloads/Eastwood_done.xlsx')
+drinks, milks, syrups = load_menu_data()
 
 drink_types = get_unique_drink_types(drinks)
 
@@ -314,9 +356,7 @@ def order_ready(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
     # Получаем username из данных callback
-    print(query.data)
     _, username = query.data.split('_%@!#@$')
-    print(username)
 
     if username in user_orders:
         chat_id = user_orders[username]['chat_id']

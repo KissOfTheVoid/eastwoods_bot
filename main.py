@@ -3,7 +3,7 @@ import logging
 import pandas as pd
 import yaml
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, ConversationHandler, CallbackContext
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, ConversationHandler, CallbackContext, Filters
 
 # Включаем логирование
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -19,7 +19,7 @@ TOKEN = config_data['telegram_bot']['token']
 # Шаги разговора
 SELECT_DRINK_TYPE, SELECT_DRINK, SELECT_MILK, APPROVE_SYRUP, SELECT_SYRUP_1, SELECT_SYRUP_2, SELECT_VOLUME, SELECT_TEMPERATURE, CONFIRM_ORDER = range(9)
 
-user_messages = {}
+user_orders = {}
 
 
 # Загрузка данных из Excel файла
@@ -100,6 +100,7 @@ def reset_order(update: Update, context: CallbackContext) -> int:
 def drink_type(user_update: Update, context: CallbackContext) -> int:
     query = user_update.callback_query
     query.answer()
+
     desired_type = query.data.split('_')[1]
     matched_drinks = get_drinks_by_type(drinks, desired_type)
 
@@ -237,7 +238,8 @@ def temperature(user_update: Update, context: CallbackContext) -> int:
         [InlineKeyboardButton("Отменить заказ", callback_data="cancel")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    query.edit_message_text(text="Подтвердите ваш заказ или отмените:", reply_markup=reply_markup)
+    user_order_description = f"Заказ: {context.user_data['drink']}, {context.user_data['milk']}, {context.user_data['syrup_1']},{context.user_data['syrup_2']}, {context.user_data['volume']}ml, {context.user_data['temperature']}."
+    query.edit_message_text(text= user_order_description + "\nПодтвердите ваш заказ или отмените:", reply_markup=reply_markup)
 
     return CONFIRM_ORDER
 
@@ -249,14 +251,14 @@ def process_user_choice(user_update: Update, context: CallbackContext) -> int:
     user = user_update.effective_user
 
     if user_choice == 'confirm':
-        user_order_description = f"Заказ: {context.user_data['drink']}, {context.user_data['milk']}, {context.user_data['syrup_1']},{context.user_data['syrup_2']}, {context.user_data['volume']}ml, {context.user_data['temperature']}."
+        user_order_description = f"Ваш заказ: {context.user_data['drink']}, {context.user_data['milk']}, {context.user_data['syrup_1']},{context.user_data['syrup_2']}, {context.user_data['volume']}ml, {context.user_data['temperature']}."
 
         barista_chat_username = config_data['telegram_bot']['barista_chat_id']
+
         user_link = "@" + user.username
         message_to_barista = f"Новый заказ от {user_link}:\n{user_order_description}"
-
         context.bot.send_message(chat_id=barista_chat_username, text=message_to_barista)
-
+        user_orders[user.username] = {'chat_id': query['message']['chat']['id'], 'order': user_order_description}
         context.bot.send_message(chat_id=user_update.effective_user.id,
                                  text=user_order_description + " подтвержден и отправлен на приготовление.")
     elif user_choice == 'cancel':
@@ -266,6 +268,27 @@ def process_user_choice(user_update: Update, context: CallbackContext) -> int:
         context.bot.send_message(chat_id=user_update.effective_user.id, text="Заказ отменен.")
 
     return reset_order(user_update, context)
+
+
+def coffee_ready(update: Update, context: CallbackContext) -> None:
+    # Извлекаем текст сообщения от бариста
+    print("ready")
+    message_text = update.message.text
+    # Разбиваем текст на части для получения имени пользователя
+    _, username = message_text.split()
+
+    # Проверяем, есть ли заказ для этого пользователя
+    if username in user_orders:
+        chat_id = user_orders[username]['chat_id']
+        order_description = user_orders[username]['order']
+        # Отправляем уведомление пользователю
+        context.bot.send_message(chat_id=chat_id, text=f"Ваш заказ готов: {order_description}")
+
+        # Удаляем заказ из списка
+        del user_orders[username]
+    else:
+        # Если заказ не найден, отправляем сообщение об этом бариста
+        context.bot.send_message(chat_id=update.effective_chat.id, text=f"Заказ для пользователя {username} не найден.")
 
 
 def main() -> None:
@@ -289,6 +312,8 @@ def main() -> None:
     )
 
     dp.add_handler(conv_handler)
+    dp.add_handler(CommandHandler('coffee_ready', coffee_ready,
+                                  Filters.chat(chat_id=int(config_data['telegram_bot']['barista_chat_id']))))
     updater.start_polling()
     updater.idle()
 

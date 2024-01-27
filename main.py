@@ -1,4 +1,6 @@
 import logging
+import time
+from collections import defaultdict
 
 import gspread
 import pandas as pd
@@ -25,7 +27,8 @@ TOKEN = config_data['telegram_bot']['token']
 SELECT_DRINK_TYPE, SELECT_DRINK, SELECT_MILK, APPROVE_SYRUP, SELECT_SYRUP_1, SELECT_SYRUP_2, SELECT_VOLUME, SELECT_TEMPERATURE, CONFIRM_ORDER = range(
     9)
 
-user_orders = {}
+# user_orders = {}
+user_orders = defaultdict(list)
 
 
 # Загрузка данных из Excel файла
@@ -161,8 +164,6 @@ def drink(user_update: Update, context: CallbackContext) -> int:
     # Логируем нажатие кнопки
     logger.info(f"Пользователь {user_update.effective_user.username} выбрал напиток: {context.user_data['drink']}")
     if drinks[context.user_data['drink']]['Молоко'] == '-':
-        keyboard = [[InlineKeyboardButton(syrup, callback_data=f'syrup_{syrup}') for syrup in syrups]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
         context.user_data['milk'] = 'Нет'
 
         syrup_amount = ["Не хочу", "Один, пожалуйста", "Давайте два"]
@@ -294,77 +295,122 @@ def process_user_choice(user_update: Update, context: CallbackContext) -> int:
     user_choice = query.data
     user = user_update.effective_user
 
+    # Используйте user_id вместо username, если username отсутствует
+    user_identifier = user.username if user.username else str(user.id)
+
     if user_choice == 'confirm':
-        user_order_description = f"Ваш заказ: {context.user_data['drink']}, {context.user_data['milk']}, {context.user_data['syrup_1']},{context.user_data['syrup_2']}, {context.user_data['volume']}ml, {context.user_data['temperature']}."
+        order_id = int(time.time())  # Используйте текущее время как идентификатор заказа
+        user_order_description = f"Ваш заказ: {context.user_data['drink']}, {context.user_data['milk']}, {context.user_data['syrup_1']}, {context.user_data['syrup_2']}, {context.user_data['volume']}ml, {context.user_data['temperature']}."
 
         barista_chat_username = config_data['telegram_bot']['barista_chat_id']
-        user_link = "@" + user.username
+        user_link = "@" + user_identifier if user.username else str(user_identifier)
         message_to_barista = f"Новый заказ от {user_link}:\n{user_order_description}"
 
         keyboard = [
-            [InlineKeyboardButton("Заказ получил", callback_data=f"received_%@!#@${user.username}")]
+            [InlineKeyboardButton("Заказ получил", callback_data=f"received_%@!#@${user_identifier}_%@!#@${order_id}")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         context.bot.send_message(chat_id=barista_chat_username, text=message_to_barista, reply_markup=reply_markup)
-        user_orders[user.username] = {'chat_id': query.message.chat.id, 'order': user_order_description}
+        user_orders[user_identifier].append(
+            {'order_id': order_id, 'chat_id': query.message.chat.id, 'order': user_order_description})
         context.bot.send_message(chat_id=user_update.effective_user.id,
                                  text=user_order_description + " подтвержден и отправлен на приготовление.")
+        logger.info(
+            f"Пользователь {user_identifier} подтвердил заказ: {user_order_description}")
 
     elif user_choice == 'cancel':
         context.bot.send_message(chat_id=user_update.effective_user.id, text="Заказ отменен.")
+        logger.info(
+            f"Пользователь {user_identifier} отменил заказ")
 
     return reset_order(user_update, context)
 
 
 def coffee_ready(update: Update, context: CallbackContext) -> None:
-    # Проверяем, есть ли активные заказы
-    if user_orders:
-        # Создаем список кнопок
-        keyboard = []
-        for username, order_info in user_orders.items():
-            order_description = order_info['order']
-            # Каждая кнопка содержит описание заказа и имя пользователя
-            button_text = f"Заказ для {username}"
-            callback_data = f"ready_%@!#@${username}"
+    # Определите, откуда пришел запрос
+    message = update.message if update.message else update.callback_query.message
+
+    if not user_orders:
+        message.reply_text('В данный момент активных заказов нет.')
+        return
+
+    # Создаем список кнопок
+    keyboard = []
+    for username, orders in user_orders.items():
+        for order in orders:
+            order_id = order['order_id']
+            button_text = f"{username}: {order_id}"
+            callback_data = f"ready_%@!#@${username}_%@!#@${order_id}"
             keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        update.message.reply_text('Выберите заказ, который готов:', reply_markup=reply_markup)
-    else:
-        # Если заказов нет, отправляем сообщение об этом
-        update.message.reply_text('В данный момент активных заказов нет.')
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    message.reply_text('Выберите заказ:', reply_markup=reply_markup)
 
 
 def order_received(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
 
-    _, username = query.data.split('_%@!#@$')
-    if username in user_orders:
-        chat_id = user_orders[username]['chat_id']
-        context.bot.send_message(chat_id=chat_id, text="Начали готовить ваш заказ")
-        # Здесь можно удалить заказ из user_orders, если это необходимо
-        # del user_orders[username]
-        query.edit_message_text(text=query.message.text)
-    else:
-        query.edit_message_text(text=f"Заказ для {username} уже был обработан или не найден.")
+    _, username, order_id = query.data.split('_%@!#@$')
+    order_id = int(order_id)
+
+    for order in user_orders[username]:
+        if order['order_id'] == order_id:
+            chat_id = order['chat_id']
+            context.bot.send_message(chat_id=chat_id, text="Начали готовить ваш заказ")
+            # Здесь можно удалить заказ из списка, если это необходимо
+            # user_orders[username].remove(order)
+            query.edit_message_text(text=query.message.text)
+            return
+
+    query.edit_message_text(text=f"Заказ для {username} уже был обработан или не найден.")
 
 
 def order_ready(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
-    # Получаем username из данных callback
-    _, username = query.data.split('_%@!#@$')
 
-    if username in user_orders:
-        chat_id = user_orders[username]['chat_id']
-        order_description = user_orders[username]['order']
-        context.bot.send_message(chat_id=chat_id, text=f"Ваш заказ готов: {order_description}")
-        del user_orders[username]
-        query.edit_message_text(text=f"Заказ для {username} отправлен.")
-    else:
-        query.edit_message_text(text=f"Заказ для {username} уже был обработан или не найден.")
+    # Разбиение callback_data на части
+    data_parts = query.data.split('_%@!#@$')
+    if len(data_parts) != 3:
+        query.edit_message_text(text="Ошибка в данных заказа.")
+        return
+
+    action = data_parts[0]
+    username = data_parts[1]
+    order_id = int(data_parts[2])
+    print(action, username, order_id)
+
+    if action == 'ready':
+        # Показать подробности заказа
+        for order in user_orders[username]:
+            if order['order_id'] == order_id:
+                order_details = f"Заказ для {username}: {order['order']}"
+                keyboard = [
+                    [InlineKeyboardButton("Заказ готов",
+                                          callback_data=f"confirm_order_%@!#@${username}_%@!#@${order_id}")],
+                    [InlineKeyboardButton("Вернуться к заказам", callback_data="back_to_orders")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                query.edit_message_text(text=order_details, reply_markup=reply_markup)
+                return
+
+    elif action == 'confirm_order':
+        # Обработать подтверждение заказа
+        for order in user_orders[username]:
+            if order['order_id'] == order_id:
+                chat_id = order['chat_id']
+                context.bot.send_message(chat_id=chat_id, text=f"Ваш заказ готов: {order['order']}")
+                user_orders[username].remove(order)
+                query.edit_message_text(text=f"Заказ для {username} отправлен.")
+                return
+
+    query.edit_message_text(text=f"Заказ для {username} уже был обработан или не найден.")
+
+
+def back_to_orders_handler(update: Update, context: CallbackContext) -> None:
+    coffee_ready(update, context)
 
 
 def update_menu_command(update: Update, context: CallbackContext):
@@ -403,6 +449,8 @@ def main() -> None:
                                   Filters.chat(chat_id=int(config_data['telegram_bot']['barista_chat_id']))))
     dp.add_handler(CallbackQueryHandler(order_received, pattern='^received_'))
     dp.add_handler(CallbackQueryHandler(order_ready, pattern='^ready_'))
+    dp.add_handler(CallbackQueryHandler(order_ready, pattern='^confirm_order_'))
+    dp.add_handler(CallbackQueryHandler(back_to_orders_handler, pattern='^back_to_orders$'))
     updater.start_polling()
     updater.idle()
 

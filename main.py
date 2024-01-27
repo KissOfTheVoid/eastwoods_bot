@@ -1,6 +1,7 @@
 import logging
 import time
 from collections import defaultdict
+import datetime
 
 import gspread
 import pandas as pd
@@ -282,7 +283,7 @@ def temperature(user_update: Update, context: CallbackContext) -> int:
         [InlineKeyboardButton("Отменить заказ", callback_data="cancel")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    user_order_description = f"Заказ: {context.user_data['drink']}, {context.user_data['milk']}, {context.user_data['syrup_1']},{context.user_data['syrup_2']}, {context.user_data['volume']}ml, {context.user_data['temperature']}."
+    user_order_description = f"Ваш заказ:\n{context.user_data['drink']},\nМолоко: {context.user_data['milk']},\nСиропы: {context.user_data['syrup_1']}, {context.user_data['syrup_2']},\nОбъем: {context.user_data['volume']}ml,\nТемпература: {context.user_data['temperature']}."
     query.edit_message_text(text=user_order_description + "\nПодтвердите ваш заказ или отмените:",
                             reply_markup=reply_markup)
 
@@ -299,8 +300,8 @@ def process_user_choice(user_update: Update, context: CallbackContext) -> int:
     user_identifier = user.username if user.username else str(user.id)
 
     if user_choice == 'confirm':
-        order_id = int(time.time())  # Используйте текущее время как идентификатор заказа
-        user_order_description = f"Ваш заказ: {context.user_data['drink']}, {context.user_data['milk']}, {context.user_data['syrup_1']}, {context.user_data['syrup_2']}, {context.user_data['volume']}ml, {context.user_data['temperature']}."
+        order_id = int(time.time() + 3 * 60 * 60)  # Используйте текущее время как идентификатор заказа
+        user_order_description = f"Ваш заказ:\n{context.user_data['drink']},\nМолоко: {context.user_data['milk']},\nСиропы: {context.user_data['syrup_1']}, {context.user_data['syrup_2']},\nОбъем: {context.user_data['volume']}ml,\nТемпература: {context.user_data['temperature']}."
 
         barista_chat_username = config_data['telegram_bot']['barista_chat_id']
         user_link = "@" + user_identifier if user.username else str(user_identifier)
@@ -315,7 +316,7 @@ def process_user_choice(user_update: Update, context: CallbackContext) -> int:
         user_orders[user_identifier].append(
             {'order_id': order_id, 'chat_id': query.message.chat.id, 'order': user_order_description})
         context.bot.send_message(chat_id=user_update.effective_user.id,
-                                 text=user_order_description + " подтвержден и отправлен на приготовление.")
+                                 text=user_order_description + "\nподтвержден и отправлен на приготовление.")
         logger.info(
             f"Пользователь {user_identifier} подтвердил заказ: {user_order_description}")
 
@@ -340,7 +341,8 @@ def coffee_ready(update: Update, context: CallbackContext) -> None:
     for username, orders in user_orders.items():
         for order in orders:
             order_id = order['order_id']
-            button_text = f"{username}: {order_id}"
+            date_time = datetime.datetime.utcfromtimestamp(order_id)
+            button_text = f"{username}: {date_time}"
             callback_data = f"ready_%@!#@${username}_%@!#@${order_id}"
             keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
 
